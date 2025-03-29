@@ -4,13 +4,16 @@ import requests
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-from typing import Tuple
+from typing import Tuple, Optional, Dict
 import yfinance as yf
 from datetime import datetime, timedelta
 from .config import Config
+import logging
 
 # Load environment variables
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class DataLoader:
@@ -20,7 +23,7 @@ class DataLoader:
         if not self.etherscan_api_key:
             raise ValueError("ETHERSCAN_API_KEY not found in .env file")
 
-    def fetch_gas_data(self) -> dict:
+    def _fetch_gas_data(self) -> Optional[Dict]:
         """Fetch current gas prices from Etherscan"""
         try:
             url = "https://api.etherscan.io/api"
@@ -33,17 +36,35 @@ class DataLoader:
             response = requests.get(url, params=params)
             data = response.json()
 
-            # Print API response for debugging
-            print("Etherscan API Response:", data)
-
             if data["status"] != "1" or "result" not in data:
-                print(f"Etherscan API Error: {data.get('message', 'Unknown error')}")
+                logger.error(
+                    f"Etherscan API Error: {data.get('message', 'Unknown error')}"
+                )
                 return None
 
-            return data["result"]
+            result = data["result"]
+
+            # Gas prices are already in GWEI from Etherscan
+            safe_low = float(result["SafeGasPrice"])
+            standard = float(result["ProposeGasPrice"])
+            fast = float(result["FastGasPrice"])
+            base_fee = float(result["suggestBaseFee"])
+
+            logger.info("Current Gas Prices (GWEI):")
+            logger.info(f"Safe Low: {safe_low:.1f}")
+            logger.info(f"Standard: {standard:.1f}")
+            logger.info(f"Fast: {fast:.1f}")
+            logger.info(f"Base Fee: {base_fee:.1f}")
+
+            return {
+                "SafeGasPrice": safe_low,
+                "ProposeGasPrice": standard,
+                "FastGasPrice": fast,
+                "suggestBaseFee": base_fee,
+            }
 
         except Exception as e:
-            print(f"Error fetching gas data: {e}")
+            logger.error(f"Error fetching gas data: {e}")
             return None
 
     def fetch_combined_data(self) -> pd.DataFrame:
@@ -63,7 +84,7 @@ class DataLoader:
             )
 
             # Get gas data
-            gas_data = self.fetch_gas_data()
+            gas_data = self._fetch_gas_data()
             if gas_data:
                 # Convert gas prices from string to float and multiply by 10 for GWEI
                 price_df["gas_safe_low"] = float(gas_data["SafeGasPrice"]) * 20

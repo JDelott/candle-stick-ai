@@ -2,6 +2,7 @@ from keras.models import Sequential, load_model as keras_load_model
 from keras.layers import LSTM, Dense, Dropout
 from keras.optimizers import Adam
 from .config import Config
+from pathlib import Path
 
 
 def create_model(
@@ -63,5 +64,7 @@ def save_model(model: Sequential, filename: str):
 
 def load_model(filename: str, target: str = "price") -> Sequential:
     """Load a trained model"""
-    model_path = Config.MODELS_DIR / filename
-    return keras_load_model(model_path)
+    # Get just the filename without the path
+    model_filename = Path(filename).name
+    model_path = Config.MODELS_DIR / model_filename
+    return keras_load_model(str(model_path))

@@ -1,6 +1,6 @@
 from src.train import train
 from src.predict import Predictor
-from src.config import Config
+from src.api import app
 import argparse
 from pathlib import Path
 
@@ -9,6 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="ETH Price Predictor")
     parser.add_argument("--train", action="store_true", help="Train a new model")
     parser.add_argument("--predict", action="store_true", help="Make predictions")
+    parser.add_argument("--serve", action="store_true", help="Start API server")
     parser.add_argument(
         "--hours", type=int, default=24, help="Number of hours to predict"
     )
@@ -31,6 +32,10 @@ def main():
         print("\nMaking predictions...")
         predictor = Predictor()  # No need to pass model filename anymore
         predictions = predictor.predict_next_n(args.hours, args.target)
+
+    if args.serve:
+        print("\nStarting API server...")
+        app.run(port=5000)
 
 
 if __name__ == "__main__":
