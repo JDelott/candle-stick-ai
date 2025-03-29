@@ -1,15 +1,10 @@
-import Layout from '@/components/Layout'
-import PredictionChart from '@/components/PredictionChart'
+import Layout from '../components/Layout'
+import Dashboard from '../components/Dashboard'
 
 export default function Home() {
   return (
     <Layout>
-      <div className="max-w-7xl mx-auto py-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8">
-          ETH Price & Gas Predictor
-        </h1>
-        <PredictionChart />
-      </div>
+      <Dashboard />
     </Layout>
   )
 }
