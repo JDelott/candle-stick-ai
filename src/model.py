@@ -4,7 +4,9 @@ from keras.optimizers import Adam
 from .config import Config
 
 
-def create_model(sequence_length: int, n_features: int) -> Sequential:
+def create_model(
+    sequence_length: int, n_features: int, target: str = "price"
+) -> Sequential:
     """
     Create an LSTM model for time series prediction
 
@@ -12,25 +14,43 @@ def create_model(sequence_length: int, n_features: int) -> Sequential:
         sequence_length: Number of time steps in each input sequence
         n_features: Number of features in each time step
     """
-    model = Sequential(
-        [
-            # First LSTM layer with return sequences for stacking
-            LSTM(
-                units=50,
-                activation="relu",
-                return_sequences=True,
-                input_shape=(sequence_length, n_features),
-            ),
-            Dropout(0.2),
-            # Second LSTM layer
-            LSTM(units=50, activation="relu"),
-            Dropout(0.2),
-            # Output layer
-            Dense(units=1),
-        ]
-    )
-
-    model.compile(optimizer=Adam(learning_rate=0.001), loss="mean_squared_error")
+    if target == "gas":
+        # Enhanced model for gas predictions
+        model = Sequential(
+            [
+                LSTM(
+                    units=64,
+                    activation="relu",
+                    return_sequences=True,
+                    input_shape=(sequence_length, n_features),
+                ),
+                Dropout(0.1),
+                LSTM(units=32, activation="relu", return_sequences=True),
+                Dropout(0.1),
+                LSTM(units=16, activation="relu"),
+                Dense(units=8, activation="relu"),
+                Dense(units=1),
+            ]
+        )
+        # Use mean absolute error for gas (better for spiky data)
+        model.compile(optimizer=Adam(learning_rate=0.001), loss="mae")
+    else:
+        # Original model for price predictions
+        model = Sequential(
+            [
+                LSTM(
+                    units=50,
+                    activation="relu",
+                    return_sequences=True,
+                    input_shape=(sequence_length, n_features),
+                ),
+                Dropout(0.2),
+                LSTM(units=50, activation="relu"),
+                Dropout(0.2),
+                Dense(units=1),
+            ]
+        )
+        model.compile(optimizer=Adam(learning_rate=0.001), loss="mean_squared_error")
 
     return model
 
@@ -41,7 +61,7 @@ def save_model(model: Sequential, filename: str):
     model.save(model_path)
 
 
-def load_model(filename: str) -> Sequential:
+def load_model(filename: str, target: str = "price") -> Sequential:
     """Load a trained model"""
     model_path = Config.MODELS_DIR / filename
     return keras_load_model(model_path)

@@ -12,6 +12,13 @@ def main():
     parser.add_argument(
         "--hours", type=int, default=24, help="Number of hours to predict"
     )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default="both",
+        choices=["price", "gas", "both"],
+        help="What to predict: price, gas, or both",
+    )
 
     args = parser.parse_args()
 
@@ -21,21 +28,9 @@ def main():
         print("Training completed!")
 
     if args.predict:
-        model_files = list(Config.MODELS_DIR.glob("*.h5"))
-        if not model_files:
-            print("No trained models found! Please train a model first.")
-            return
-
-        latest_model = str(max(model_files))
-        print(f"Using model: {latest_model}")
-        predictor = Predictor(latest_model)
-
-        print(f"\nPredicting next {args.hours} hours...")
-        predictions = predictor.predict_next_n(args.hours)
-
-        print("\nPredictions:")
-        for i, price in enumerate(predictions, 1):
-            print(f"Hour {i}: ${price:.2f}")
+        print("\nMaking predictions...")
+        predictor = Predictor()  # No need to pass model filename anymore
+        predictions = predictor.predict_next_n(args.hours, args.target)
 
 
 if __name__ == "__main__":

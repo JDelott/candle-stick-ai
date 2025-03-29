@@ -9,7 +9,7 @@ def train():
     # Initialize data loader
     data_loader = DataLoader()
 
-    # Fetch and prepare data
+    # Fetch data
     print("Fetching price and gas data...")
     df = data_loader.fetch_combined_data()
 
@@ -19,46 +19,47 @@ def train():
 
     print(f"Fetched {len(df)} data points")
 
-    # Prepare sequences for LSTM
-    print("Preparing sequences...")
-    X, y = data_loader.prepare_sequences(df)
-
-    # Split into train/test sets
-    train_size = int(len(X) * Config.TRAIN_SPLIT)
-    X_train, X_test = X[:train_size], X[train_size:]
-    y_train, y_test = y[:train_size], y[train_size:]
-
-    print(f"Training set shape: {X_train.shape}")
-    print(f"Testing set shape: {X_test.shape}")
-
-    # Create and train model
-    print("Creating model...")
-    model = create_model(
+    # Train price model
+    print("\nTraining price model...")
+    Config.TARGET_COLUMN = "close"
+    price_model = create_model(
         sequence_length=Config.SEQUENCE_LENGTH, n_features=len(Config.FEATURE_COLUMNS)
     )
 
-    print("Training model...")
-    history = model.fit(
-        X_train,
-        y_train,
-        validation_data=(X_test, y_test),
+    X, y = data_loader.prepare_sequences(df)
+    price_history = price_model.fit(
+        X,
+        y,
         epochs=Config.EPOCHS,
         batch_size=Config.BATCH_SIZE,
+        validation_split=0.2,
         verbose=1,
     )
 
-    # Evaluate model
-    print("\nEvaluating model...")
-    test_loss = model.evaluate(X_test, y_test, verbose=0)
-    print(f"Test loss: {test_loss}")
+    # Train gas model
+    print("\nTraining gas model...")
+    Config.TARGET_COLUMN = "gas_fast"
+    gas_model = create_model(
+        sequence_length=Config.SEQUENCE_LENGTH, n_features=len(Config.FEATURE_COLUMNS)
+    )
 
-    # Save model
-    print("Saving model...")
-    model_filename = f"eth_predictor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.h5"
-    save_model(model, model_filename)
-    print(f"Model saved as {model_filename}")
+    X, y = data_loader.prepare_sequences(df)
+    gas_history = gas_model.fit(
+        X,
+        y,
+        epochs=Config.EPOCHS,
+        batch_size=Config.BATCH_SIZE,
+        validation_split=0.2,
+        verbose=1,
+    )
 
-    return model, history
+    # Save models
+    print("\nSaving models...")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_model(price_model, f"eth_price_{timestamp}.h5")
+    save_model(gas_model, f"eth_gas_{timestamp}.h5")
+
+    return (price_model, gas_model), (price_history, gas_history)
 
 
 if __name__ == "__main__":
