@@ -15,3 +15,11 @@ ENV/
 .env
 data/*.csv
 models/*.h5
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+frontend/.env*.local
+frontend/out/
+frontend/build/
+frontend/.DS_Store
