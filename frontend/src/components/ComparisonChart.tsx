@@ -9,6 +9,9 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+
+  ReferenceLine,
+
   ReferenceArea
 } from 'recharts'
 
@@ -18,6 +21,12 @@ interface HistoricalData {
   gas: number
 }
 
+interface ProcessedData {
+  timestamp: string
+  value: number
+  type: 'historical' | 'prediction'
+}
+
 interface ComparisonChartProps {
   type: 'price' | 'gas'
   predictions: Array<{ hour: string; price: number; gas: number }>
@@ -25,94 +34,155 @@ interface ComparisonChartProps {
 
 export default function ComparisonChart({ type, predictions }: ComparisonChartProps) {
   const [historicalData, setHistoricalData] = useState<HistoricalData[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [transitionPoint, setTransitionPoint] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchHistorical = async () => {
       try {
-        // Fetch last 7 days of historical data
         const response = await fetch('/api/historical')
         if (!response.ok) throw new Error('Failed to fetch historical data')
         const data = await response.json()
-        setHistoricalData(data.historical)
+        if (data.historical && data.historical.length > 0) {
+          // Process and clean historical data
+          const processedData = data.historical
+            .filter((item: HistoricalData) => item[type] !== null && item[type] !== undefined)
+            .map((item: HistoricalData) => ({
+              ...item,
+              // Ensure proper number conversion and handle edge cases
+              [type]: type === 'gas' 
+                ? Math.max(1, parseFloat(item[type].toString())) 
+                : parseFloat(item[type].toString())
+            }))
+            .sort((a: HistoricalData, b: HistoricalData) => 
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            )
+
+          setHistoricalData(processedData)
+          setTransitionPoint(processedData[processedData.length - 1].timestamp)
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load historical data')
-      } finally {
-        setLoading(false)
+        console.error('Error fetching historical data:', err)
       }
     }
 
     fetchHistorical()
-  }, [])
+  }, [type])
 
-  if (loading) return <div className="h-full flex items-center justify-center">Loading...</div>
-  if (error) return <div className="h-full flex items-center justify-center text-red-500">Error: {error}</div>
+  // Create combined dataset
+  const historicalSeries: ProcessedData[] = historicalData.map(d => ({
+    timestamp: new Date(d.timestamp).toLocaleString(),
+    value: d[type],
+    type: 'historical'
+  }))
 
-  // Combine historical and prediction data
-  const combinedData = [
-    ...historicalData.map(d => ({
-      timestamp: new Date(d.timestamp).toLocaleString(),
-      [type]: d[type],
-      isHistorical: true
-    })),
-    ...predictions.map(p => ({
-      timestamp: p.hour,
-      [type]: p[type],
-      isPrediction: true
-    }))
-  ]
+  const predictionSeries: ProcessedData[] = predictions.map(p => ({
+    timestamp: p.hour,
+    value: p[type],
+    type: 'prediction'
+  }))
+
+  const combinedData = [...historicalSeries, ...predictionSeries]
+
+  // Calculate appropriate Y-axis domain
+  const allValues = combinedData.map(d => d.value).filter(v => v !== null) as number[]
+  const minValue = Math.min(...allValues)
+  const maxValue = Math.max(...allValues)
+  const padding = (maxValue - minValue) * 0.1
+
+  const yDomain = type === 'gas' 
+    ? [Math.max(0, minValue - padding), maxValue + padding]
+    : [minValue - padding, maxValue + padding]
 
   return (
     <div className="w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={combinedData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+        <LineChart data={combinedData} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          
+          {transitionPoint && (
+            <>
+              {/* Gray area marking predictions */}
+              <ReferenceArea
+                x1={transitionPoint}
+                x2={combinedData[combinedData.length - 1]?.timestamp}
+                fill="#f8f9fa"
+                fillOpacity={0.3}
+              />
+              
+              {/* Transition line */}
+              <ReferenceLine
+                x={transitionPoint}
+                stroke="#666"
+                strokeWidth={2}
+                strokeDasharray="3 3"
+                label={{
+                  value: 'Predictions Start',
+                  position: 'top',
+                  fill: '#666',
+                  fontSize: 12,
+                  fontWeight: 'bold'
+                }}
+              />
+            </>
+          )}
+
           <XAxis 
-            dataKey="timestamp" 
+            dataKey="timestamp"
             tick={{ fontSize: 12 }}
             interval={Math.floor(combinedData.length / 8)}
             angle={-45}
             textAnchor="end"
+            height={60}
           />
+          
           <YAxis 
             tick={{ fontSize: 12 }}
-            domain={['auto', 'auto']}
-          />
-          <Tooltip 
-            content={({ active, payload }) => {
-              if (active && payload && payload.length) {
-                const data = payload[0].payload
-                return (
-                  <div className="bg-white p-3 border rounded shadow">
-                    <p className="text-sm font-medium">{data.timestamp}</p>
-                    <p className="text-sm">
-                      {type === 'price' ? `$${payload[0].value}` : `${payload[0].value} GWEI`}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {data.isHistorical ? 'Historical' : 'Predicted'}
-                    </p>
-                  </div>
-                )
-              }
-              return null
+            domain={yDomain}
+            label={{ 
+              value: type === 'price' ? 'Price (USD)' : 'Gas (GWEI)',
+              angle: -90,
+              position: 'insideLeft',
+              dy: 50
             }}
           />
-          <Legend />
-          <ReferenceArea
-            x1={historicalData[historicalData.length - 1]?.timestamp}
-            x2={predictions[0]?.hour}
-            fill="#f8f9fa"
-            fillOpacity={0.3}
-            label={{ value: "Prediction Start", position: "insideTop" }}
+          
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              borderRadius: '8px',
+              padding: '10px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            }}
+            formatter={(value: number) => [
+              type === 'price' ? `$${value.toFixed(2)}` : `${value.toFixed(1)} GWEI`,
+              value === null ? 'N/A' : type === 'price' ? 'Price' : 'Gas'
+            ]}
           />
+          
+          <Legend />
+          
+          {/* Historical line */}
           <Line
             type="monotone"
-            dataKey={type}
+            dataKey="value"
             stroke={type === 'price' ? '#8884d8' : '#82ca9d'}
-            name={type === 'price' ? 'ETH Price (USD)' : 'Gas (GWEI)'}
             strokeWidth={2}
             dot={false}
+            name="Historical"
+            data={historicalSeries}
+            connectNulls
+          />
+          
+          {/* Prediction line */}
+          <Line
+            type="monotone"
+            dataKey="value"
+            stroke="#ff7300"
+            strokeWidth={3}
+            dot={false}
+            name="Prediction"
+            data={predictionSeries}
+            connectNulls
           />
         </LineChart>
       </ResponsiveContainer>

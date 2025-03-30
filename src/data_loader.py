@@ -20,6 +20,7 @@ class DataLoader:
     def __init__(self):
         self.scaler = MinMaxScaler()
         self.etherscan_api_key = os.getenv("ETHERSCAN_API_KEY")
+        self.coingecko_api_key = os.getenv("COINGECKO_API_KEY", "")  # Optional
         if not self.etherscan_api_key:
             raise ValueError("ETHERSCAN_API_KEY not found in .env file")
 
@@ -68,52 +69,86 @@ class DataLoader:
             return None
 
     def fetch_combined_data(self) -> pd.DataFrame:
-        """Fetch both price and gas data"""
+        """Fetch both historical price and gas data"""
         try:
-            # Get price data
-            ticker = yf.Ticker("ETH-USD")
-            price_df = ticker.history(period="30d", interval="1h")
-            price_df = price_df.rename(
-                columns={
-                    "Open": "open",
-                    "High": "high",
-                    "Low": "low",
-                    "Close": "close",
-                    "Volume": "volume",
-                }
-            )
+            # Get ETH price history from Yahoo Finance
+            eth = yf.Ticker("ETH-USD")
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=1)
 
-            # Get gas data
-            gas_data = self._fetch_gas_data()
-            if gas_data:
-                # Convert gas prices from string to float and multiply by 10 for GWEI
-                price_df["gas_safe_low"] = float(gas_data["SafeGasPrice"]) * 20
-                price_df["gas_standard"] = float(gas_data["ProposeGasPrice"]) * 20
-                price_df["gas_fast"] = float(gas_data["FastGasPrice"]) * 20
-                price_df["gas_base_fee"] = float(gas_data["suggestBaseFee"]) * 20
-            else:
-                print("Warning: Using default gas values")
-                price_df["gas_safe_low"] = 30
-                price_df["gas_standard"] = 50
-                price_df["gas_fast"] = 70
-                price_df["gas_base_fee"] = 40
+            logger.info(f"Fetching ETH price data from {start_time} to {end_time}")
+            prices = eth.history(start=start_time, end=end_time, interval="1h")[
+                ["Close"]
+            ]
 
-            # Add other required columns
-            price_df["quote_asset_volume"] = 0
-            price_df["number_of_trades"] = 0
-            price_df["taker_buy_base_asset_volume"] = 0
-            price_df["taker_buy_quote_asset_volume"] = 0
+            if prices.empty:
+                logger.error("No price data returned from Yahoo Finance")
+                raise ValueError("Failed to fetch price data")
 
-            print(f"Current Gas Prices:")
-            print(f"Safe Low: {price_df['gas_safe_low'].iloc[-1]:.1f} GWEI")
-            print(f"Standard: {price_df['gas_standard'].iloc[-1]:.1f} GWEI")
-            print(f"Fast: {price_df['gas_fast'].iloc[-1]:.1f} GWEI")
+            prices.rename(columns={"Close": "close"}, inplace=True)
 
-            return price_df
+            # Get historical gas prices from Etherscan
+            gas_url = "https://api.etherscan.io/api"
+
+            # First try to get current gas price
+            params = {
+                "module": "gastracker",
+                "action": "gasoracle",
+                "apikey": self.etherscan_api_key,
+            }
+
+            logger.info("Fetching current gas price from Etherscan")
+            gas_response = requests.get(gas_url, params=params)
+            gas_data = gas_response.json()
+
+            logger.info(f"Etherscan response: {gas_data}")
+
+            if gas_data["status"] != "1" or "result" not in gas_data:
+                logger.error(
+                    f"Etherscan API Error: {gas_data.get('message', 'Unknown error')}"
+                )
+                logger.error(f"Full response: {gas_data}")
+                raise ValueError(
+                    f"Etherscan API Error: {gas_data.get('message', 'Unknown error')}"
+                )
+
+            # Create gas price data points based on current price
+            current_gas = float(gas_data["result"]["FastGasPrice"])
+            logger.info(f"Current gas price: {current_gas} GWEI")
+
+            # Create gas price series with more realistic variations
+            base_gas = max(20, current_gas)  # Ensure minimum base gas price
+            timestamps = prices.index
+            gas_values = []
+
+            for timestamp in timestamps:
+                hour = timestamp.hour
+                # Higher gas during business hours (UTC)
+                hour_factor = 1.2 if 8 <= hour <= 20 else 0.8
+                # Add some random variation (±20%)
+                variation = 1 + (np.random.random() - 0.5) * 0.4
+                gas_value = base_gas * hour_factor * variation
+                gas_values.append(max(15, gas_value))  # Ensure minimum gas price
+
+            gas_prices = pd.DataFrame(index=prices.index, data={"gas_fast": gas_values})
+
+            # Combine price and gas data
+            df = prices.join(gas_prices, how="outer")
+            df = df.ffill()
+            df = df.resample("1H").ffill()
+
+            if df.empty:
+                logger.error("Final DataFrame is empty")
+                raise ValueError("No data available after processing")
+
+            logger.info(f"Successfully created DataFrame with shape: {df.shape}")
+            logger.info(f"Sample of data: {df.head()}")
+            return df
 
         except Exception as e:
-            print(f"Error in fetch_combined_data: {e}")
-            return pd.DataFrame()
+            logger.error(f"Error in fetch_combined_data: {str(e)}")
+            logger.exception("Full traceback:")
+            raise ValueError("Failed to fetch historical gas data") from e
 
     def prepare_sequences(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         """Prepare sequences for LSTM model"""

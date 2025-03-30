@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
-    const response = await fetch('http://127.0.0.1:5000/historical', {
+    const response = await fetch('http://127.0.0.1:5000/market-conditions', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -18,7 +18,7 @@ export async function GET() {
     const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
-    console.error('Failed to fetch historical data:', error)
+    console.error('Failed to fetch market conditions:', error)
     return NextResponse.json(
       { 
         success: false, 

@@ -8,7 +8,9 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer
+  ResponsiveContainer,
+  Area,
+  ReferenceLine
 } from 'recharts'
 
 interface Prediction {
@@ -108,29 +110,70 @@ export default function PredictionChart({ type }: PredictionChartProps) {
   return (
     <div className="w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={predictions} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+        <LineChart data={predictions} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+          <defs>
+            <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={type === 'price' ? '#8884d8' : '#82ca9d'} stopOpacity={0.1}/>
+              <stop offset="95%" stopColor={type === 'price' ? '#8884d8' : '#82ca9d'} stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis 
-            dataKey="hour" 
+            dataKey="hour"
             tick={{ fontSize: 12 }}
             interval={2}
+            angle={-15}
+            dy={10}
           />
           <YAxis 
             tick={{ fontSize: 12 }}
             domain={['auto', 'auto']}
+            label={{ 
+              value: type === 'price' ? 'Price (USD)' : 'Gas (GWEI)', 
+              angle: -90, 
+              position: 'insideLeft',
+              dy: 50
+            }}
           />
-          <Tooltip 
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              borderRadius: '8px',
+              padding: '10px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            }}
             formatter={(value: number) => 
               type === 'price' ? `$${value.toFixed(2)}` : `${value.toFixed(1)} GWEI`
             }
           />
-          <Legend />
+          <Legend 
+            verticalAlign="top"
+            height={36}
+          />
+          <Area
+            type="monotone"
+            dataKey={type}
+            stroke={type === 'price' ? '#8884d8' : '#82ca9d'}
+            fillOpacity={1}
+            fill="url(#colorValue)"
+          />
           <Line
             type="monotone"
             dataKey={type}
             stroke={type === 'price' ? '#8884d8' : '#82ca9d'}
-            name={type === 'price' ? 'ETH Price (USD)' : 'Gas (GWEI)'}
+            strokeWidth={2}
             dot={false}
+            name={type === 'price' ? 'ETH Price' : 'Gas Price'}
+          />
+          <ReferenceLine
+            y={type === 'price' ? predictions[0]?.price ?? undefined : predictions[0]?.gas ?? undefined}
+            stroke="#666"
+            strokeDasharray="3 3"
+            label={{ 
+              value: 'Current',
+              position: 'insideTopLeft',
+              fill: '#666'
+            }}
           />
         </LineChart>
       </ResponsiveContainer>
