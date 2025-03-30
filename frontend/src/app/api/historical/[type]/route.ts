@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
 
 export async function GET(
-  _request: Request,
-  { params }: { params: { type: string } }
+  request: Request,
+  context: { params: { type: string } }
 ) {
-  const type = await Promise.resolve(params.type)
-
   try {
+    const type = context.params.type
+
     if (type !== 'price' && type !== 'gas') {
       return NextResponse.json(
         { success: false, error: 'Invalid type. Must be "price" or "gas"' },
@@ -33,7 +33,7 @@ export async function GET(
     const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
-    console.error(`Failed to fetch historical ${type} data:`, error)
+    console.error(`Failed to fetch historical ${context.params.type} data:`, error)
     return NextResponse.json(
       { 
         success: false, 

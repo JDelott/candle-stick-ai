@@ -92,6 +92,15 @@ class Predictor:
             logger.error(f"Error initializing predictor: {e}")
             raise
 
+    def calculate_volatility(self, df: pd.DataFrame) -> float:
+        """Calculate price volatility using log returns"""
+        returns = np.log(df["close"] / df["close"].shift(1))
+        return returns.std() * np.sqrt(24)  # Annualized for hourly data
+
+    def calculate_momentum(self, df: pd.DataFrame) -> float:
+        """Calculate price momentum"""
+        return df["close"].pct_change(3).mean() * 100  # 3-hour momentum
+
     def predict_next_n(self, n: int = 24, target: str = "both") -> Dict:
         """Predict next n points with confidence intervals"""
         try:
@@ -155,148 +164,90 @@ class Predictor:
         return base_pred, (base_pred - confidence, base_pred + confidence)
 
     def _predict_price(
-        self, df: pd.DataFrame, n: int, conditions: Dict[str, float]
+        self, df: pd.DataFrame, n: int = 6, conditions: Dict = None
     ) -> Tuple[List[float], List[Tuple[float, float]]]:
-        """Predict prices with confidence intervals and market adaptation"""
+        """Predict ETH price for next n hours"""
         try:
-            # Get current price and feature data
-            current_price = float(df["close"].iloc[-1])
-            feature_data = df[Config.FEATURE_COLUMNS].values
+            current_price = df["close"].iloc[-1]
+            volatility = self.calculate_volatility(df)
+            momentum = self.calculate_momentum(df)
 
-            # Fit scaler with all features
-            self.price_scaler.fit(feature_data)
-            scaled_data = self.price_scaler.transform(feature_data)
+            # Get market trend
+            trend_multiplier = 1.0 if conditions.get("price_trend") == "up" else -1.0
 
-            # Get last sequence for prediction
-            last_sequence = scaled_data[-Config.SEQUENCE_LENGTH :]
             predictions = []
             confidence_intervals = []
-            last_price = current_price
 
-            # Create a template for new feature data
-            feature_template = df[Config.FEATURE_COLUMNS].iloc[-1].copy()
+            for i in range(n):
+                # Combine momentum and trend for drift
+                drift = (
+                    (momentum / 100) * trend_multiplier * 0.1
+                )  # Scale down the effect
 
-            # Market-based parameters
-            volatility = max(0.02, abs(conditions["volatility"]) / 100)
-            trend = conditions["sentiment"] * 0.01
+                # Add randomness based on historical volatility
+                random_change = np.random.normal(
+                    drift, volatility / 24
+                )  # Hourly volatility
 
-            for _ in range(n):
-                # Get base prediction
-                pred, conf = self._predict_with_confidence(
-                    self.price_model, last_sequence
-                )
+                if i == 0:
+                    pred = current_price * (1 + random_change)
+                else:
+                    pred = predictions[-1] * (1 + random_change)
 
-                # Add realistic price movement
-                change = np.random.normal(trend, volatility)
-                max_hourly_change = 0.05
-                change = np.clip(change, -max_hourly_change, max_hourly_change)
+                predictions.append(pred)
 
-                new_price = last_price * (1 + change)
-                predictions.append(float(new_price))
+                # Confidence interval widens with time
+                interval = pred * (volatility / 24) * (1 + i * 0.1) * 2
+                confidence_intervals.append((pred - interval, pred + interval))
 
-                # Add confidence intervals
-                conf_range = new_price * volatility
-                confidence_intervals.append(
-                    (float(new_price - conf_range), float(new_price + conf_range))
-                )
-
-                # Update last price
-                last_price = new_price
-
-                # Update feature template with new price
-                feature_template["close"] = new_price
-                feature_template["open"] = last_price
-                feature_template["high"] = max(new_price, last_price)
-                feature_template["low"] = min(new_price, last_price)
-
-                # Transform all features, not just price
-                new_features = self.price_scaler.transform(
-                    feature_template.values.reshape(1, -1)
-                )
-
-                # Update sequence
-                last_sequence = np.roll(last_sequence, -1, axis=0)
-                last_sequence[-1] = new_features[0]
-
+            logger.info(f"Price predictions: {[f'${p:.2f}' for p in predictions]}")
             return predictions, confidence_intervals
 
         except Exception as e:
-            logger.error(f"Error in price prediction: {e}")
+            logger.error(f"Error in price prediction: {str(e)}")
             raise
 
     def _predict_gas(
-        self, df: pd.DataFrame, n: int, conditions: Dict[str, float]
+        self, df: pd.DataFrame, n: int = 6, conditions: Dict = None
     ) -> Tuple[List[float], List[Tuple[float, float]]]:
+        """Predict gas prices for next n hours"""
         try:
-            # Convert string gas prices to float if needed
-            for col in ["gas_safe_low", "gas_standard", "gas_fast", "gas_base_fee"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-            # Get current gas price (already in GWEI)
-            current_gas = float(df["gas_fast"].iloc[-1])
+            current_gas = conditions.get("gas_price", df["gas_fast"].iloc[-1])
             logger.info(f"Starting gas prediction from {current_gas:.1f} GWEI")
 
-            feature_data = df[Config.FEATURE_COLUMNS].values
-
-            # Add timeout protection
-            try:
-                # Fit scaler with all features with timeout
-                self.gas_scaler.fit(feature_data)
-                scaled_data = self.gas_scaler.transform(feature_data)
-            except Exception as e:
-                logger.error(f"Scaling error: {e}")
-                # Fallback to simple prediction if scaling fails
-                return self._fallback_gas_prediction(current_gas, n)
+            # Calculate gas price momentum
+            gas_momentum = df["gas_fast"].pct_change(3).mean() * 100
 
             predictions = []
             confidence_intervals = []
-            last_gas = current_gas
 
-            # Gas-specific parameters
-            base_volatility = 0.05  # Reduced volatility
-            min_gas = max(5, current_gas * 0.5)  # At least 5 GWEI
-            max_gas = min(100, current_gas * 2)  # Maximum 100 GWEI
+            for i in range(n):
+                # Combine trend and momentum
+                trend_factor = 1.0 if conditions.get("gas_trend") == "up" else -1.0
+                drift = gas_momentum * trend_factor * 0.01
 
-            for _ in range(n):
-                # Add realistic gas movement
-                change = np.random.normal(0, base_volatility)
-                new_gas = last_gas * (1 + change)
-                new_gas = np.clip(new_gas, min_gas, max_gas)
+                # Add randomness
+                base_change = np.random.normal(drift, 1)
 
-                predictions.append(float(new_gas))
-                confidence_intervals.append(
-                    (float(max(5, new_gas * 0.9)), float(min(100, new_gas * 1.1)))
-                )
+                if i == 0:
+                    pred = max(1, current_gas + base_change)
+                else:
+                    pred = max(1, predictions[-1] + base_change)
 
-                last_gas = new_gas
+                predictions.append(pred)
+
+                # Wider confidence intervals for later predictions
+                interval = 2 * (1 + i * 0.1)
+                confidence_intervals.append((max(1, pred - interval), pred + interval))
 
             logger.info(
-                f"Gas predictions (GWEI): {[round(p) for p in predictions[:5]]}..."
+                f"Gas predictions (GWEI): {[f'{p:.0f}' for p in predictions]}..."
             )
             return predictions, confidence_intervals
 
         except Exception as e:
-            logger.error(f"Error in gas prediction: {e}")
-            logger.error(traceback.format_exc())
-            return self._fallback_gas_prediction(current_gas, n)
-
-    def _fallback_gas_prediction(
-        self, current_gas: float, n: int
-    ) -> Tuple[List[float], List[Tuple[float, float]]]:
-        """Fallback prediction if main prediction fails"""
-        predictions = []
-        confidence_intervals = []
-        last_gas = current_gas
-
-        for _ in range(n):
-            new_gas = last_gas * (1 + np.random.normal(0, 0.05))
-            new_gas = np.clip(new_gas, 5, 100)
-            predictions.append(float(new_gas))
-            confidence_intervals.append((float(new_gas * 0.9), float(new_gas * 1.1)))
-            last_gas = new_gas
-
-        return predictions, confidence_intervals
+            logger.error(f"Error in gas prediction: {str(e)}")
+            raise
 
 
 def main():

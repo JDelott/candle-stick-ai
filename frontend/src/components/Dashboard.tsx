@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import PredictionChart from './PredictionChart'
 import InfoCards from './InfoCards'
 import HistoricalChart from './HistoricalChart'
+import Chat from './Chat'
 
 interface Prediction {
   hour: string
@@ -149,6 +150,12 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Add Chat component */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="text-lg font-semibold mb-4">Chat with AI Assistant</h3>
+          <Chat />
         </div>
       </div>
     </div>

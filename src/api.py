@@ -7,6 +7,7 @@ import logging
 import numpy as np
 from datetime import datetime, timedelta
 import random
+from .services.chat_service import ChatService
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ CORS(
         r"/market-conditions": {"origins": "*"},
     },
 )
+
+chat_service = ChatService()
 
 
 @app.route("/predict", methods=["GET"])
@@ -114,6 +117,38 @@ def get_market_conditions():
     except Exception as e:
         print(f"Error generating market conditions: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    try:
+        data = request.json
+        question = data.get("question")
+
+        if not question:
+            return jsonify({"success": False, "error": "No question provided"}), 400
+
+        # Get current market data
+        data_loader = DataLoader()
+        df = data_loader.fetch_combined_data()
+
+        market_data = {
+            "eth_price": float(df["close"].iloc[-1]),
+            "gas_price": float(df["gas_fast"].iloc[-1]),
+            "price_trend": (
+                "up" if df["close"].iloc[-1] > df["close"].iloc[-2] else "down"
+            ),
+            "gas_trend": (
+                "up" if df["gas_fast"].iloc[-1] > df["gas_fast"].iloc[-2] else "down"
+            ),
+        }
+
+        response = chat_service.get_response(question, market_data)
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
